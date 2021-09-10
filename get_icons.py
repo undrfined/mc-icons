@@ -1,11 +1,14 @@
 from bs4 import BeautifulSoup
 from requests import get
 from PIL import Image
+import tinycss
+import re
 
 # To generate images you need to install these:
 # pip install bs4
 # pip install requests
 # pip install pil
+# pip install tinycss
 
 
 # Where to save pics?
@@ -14,26 +17,49 @@ path = "pics/[file].png"
 file_name = "[id]_[name]"
 
 
-positions = {}
-f = open("items.txt", "r")
-for i in f:
-    t = i.split(": ")
-    positions[t[0]] = t[1].replace("\n", "")
+# -----------------------------------------------------
 
 
-soup = BeautifulSoup(get("https://minecraft-ids.grahamedgecombe.com/").text, "html.parser")
+base_url = "https://minecraft-ids.grahamedgecombe.com/"
+base_url_html = get(base_url).text
+css_parser = tinycss.make_parser('page3')
 
+soup = BeautifulSoup(base_url_html, "html.parser")
 items = soup.find_all("tr", {"class": "row"})
+stylesheets = [base_url + style["href"]
+               for style in soup.select('link[rel="stylesheet"]')]
+
+sprite_sheet_url = None
+positions = {}
 li = {}
 
-img = Image.open(get("https://minecraft-ids.grahamedgecombe.com/images/sprites/items-27.png", stream=True).raw)
 
-for a in items:
-    pos = a.find("td", {"class": "row-icon"}).div["class"][1][6:]
-    desc = a.find("td", {"class": "row-desc"}).span.text
-    xy = positions[pos].split(" ")
-    x = abs(int(xy[0]))
-    y = abs(int(xy[1]))
-    final = path.replace("[file]", file_name.replace("[id]", a.td.text.replace(":", "_")).replace("[name]", desc))
-    img.crop((x, y, x + 32, y + 32)).save(final)
-    li[a.td.text] = 0
+for sheet in stylesheets:
+    data = get(sheet).text
+    style = css_parser.parse_stylesheet(data)
+
+    for rule in style.rules:
+        selector = rule.selector.as_css()  # selector name (i.e. .items-*-*-*)
+
+        if re.search(r'.items-', selector[:7]):
+            [url, x, y, _] = rule.declarations[2].value.as_css().split(" ")
+
+            positions[selector[7:]] = (
+                abs(int(x.replace("px", ""))),
+                abs(int(y.replace("px", "")))
+            )
+
+            if (sprite_sheet_url == None):
+                sprite_sheet_url = base_url + url[4:-1]
+
+
+if (sprite_sheet_url):
+    img = Image.open(get(sprite_sheet_url, stream=True).raw)
+    for a in items:
+        pos = a.find("td", {"class": "row-icon"}).div["class"][1][6:]
+        desc = a.find("td", {"class": "row-desc"}).span.text
+        [x, y] = positions[pos]
+        final = path.replace("[file]", file_name.replace(
+            "[id]", a.td.text.replace(":", "_")).replace("[name]", desc))
+        img.crop((x, y, x + 32, y + 32)).save(final)
+        li[a.td.text] = 0
